@@ -31,60 +31,66 @@ function! SyntaxCheckers_haskell_ghc_modi_GetLocList() dict
 
     if has_key(s:ghc_modi_roots, fullfile)
         let root = s:ghc_modi_roots[fullfile]
-        call syntastic#log#debug(1, "found root " . root . " for file " . fullfile)
     else
         let root = system("cd '" . expand("%:p:h") . "'; ghc-mod root")
         let s:ghc_modi_roots[fullfile] = root
-        call syntastic#log#debug(1, "computed root " . root . " for file " . fullfile)
     endif
 
     if has_key(s:ghc_modi_procs, root)
         let proc = s:ghc_modi_procs[root]
-        call syntastic#log#debug(1, "found proc")
     else
         let olddir = getcwd()
         exec "lcd " . root
         let proc = vimproc#popen2(ghcmodi_prog)
         exec "lcd " . olddir
         let s:ghc_modi_procs[root] = proc
-        call syntastic#log#debug(1, "executing ghcmodi_prog")
     endif
 
     call proc.stdin.write("check " . fullfile . "\n")
 
     let found_end = 0
-    let cmd_output = ""
+    let errors = []
+    let curbuf = bufnr('')
 
     while found_end == 0
         for line in proc.stdout.read_lines()
-            call syntastic#log#debug(1, "ghc-modi read: " . line)
             if line == "OK"
                 let found_end = 1
             elseif line =~ "^NG "
-                let cmd_output .= line . "\n"
+                call add(errors, {"text": line, "bufnr": 0, "valid": 1, "lnum":0})
                 let found_end = 1
             elseif len(line) > 0
-                let cmd_output .= line . "\n"
+                if line[0] == " "
+                    "Continuation line
+                    call add(errors, {"text": line[1:], "bufnr": 0, "valid": 1, "lnum":0})
+                else
+                    "Start of an error
+                    let matches = matchlist(line, '\m\([^:]\+\):\(\d\+\):\(\d\+\):\(.*\)')
+                    if len(matches) >= 5
+                        let err = {}
+                        let err.lnum = matches[2]
+                        let err.col = matches[3]
+                        let err.text = matches[4]
+                        let err.bufnr = curbuf
+                        let err.valid = 1
+                        if err.text[0:6] == "Warning"
+                            let err.type = "W"
+                        else
+                            let err.type = "E"
+                        endif
+                        call add(errors, err)
+                    endif
+                endif
             endif
         endfor
     endwhile
 
-    call syntastic#log#debug(1, "ghc-modi produced: " . cmd_output)
-
     "Check for program status
     if proc.checkpid()[0] !=# "run"
         unlet s:ghc_modi_procs[root]
-        call syntastic#log#debug(1, "ghc-modi stopped")
     endif
 
-    let errorformat =
-        \ '%f:%l:%c:%m,' .
-        \ '\ %m'
-
-    return SyntasticMake({
-        \ 'makeoutput': cmd_output,
-        \ 'errorformat': errorformat,
-        \ 'returns': [0] })
+    return errors
 endfunction
 
 call g:SyntasticRegistry.CreateAndRegisterChecker({
