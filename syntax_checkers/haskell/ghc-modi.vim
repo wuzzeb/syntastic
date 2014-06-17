@@ -1,6 +1,7 @@
 "============================================================================
 "File:        ghc-modi.vim
 "Description: Syntax checking plugin for syntastic.vim
+"Maintainer:  
 "License:     This program is free software. It comes without any warranty,
 "             to the extent permitted by applicable law. You can redistribute
 "             it and/or modify it under the terms of the Do What The Fuck You
@@ -23,6 +24,22 @@ let s:ghc_modi_procs = {}
 " Map where the key is the filename and the value is the root directory.
 " This is essentially just a cache of the output of `ghc-mod root`.
 let s:ghc_modi_roots = {}
+
+command! KillGhcmodi call SyntaxCheckers_haskell_ghc_modi_kill_ghcmodi()
+
+function! SyntaxCheckers_haskell_ghc_modi_kill_ghcmodi()
+    let fullfile = expand("%:p")
+
+    if has_key(s:ghc_modi_roots, fullfile)
+        let root = s:ghc_modi_roots[fullfile]
+        if has_key(s:ghc_modi_procs, root)
+            let proc = s:ghc_modi_procs[root]
+            unlet s:ghc_modi_procs[root]
+            call proc.kill()
+            call proc.waitpid()
+        endif
+    endif
+endfunction
 
 function! SyntaxCheckers_haskell_ghc_modi_GetLocList() dict
     let ghcmodi_prog = self.makeprgBuild({ 'exe': self.getExecEscaped() . ' --boundary="\n "' })
@@ -66,7 +83,7 @@ function! SyntaxCheckers_haskell_ghc_modi_GetLocList() dict
                 else
                     "Start of an error
                     let matches = matchlist(line, '\m\([^:]\+\):\(\d\+\):\(\d\+\):\(.*\)')
-                    if len(matches) >= 5
+                    if len(matches) >= 5 && matches[1] == fullfile
                         let err = {}
                         let err.lnum = matches[2]
                         let err.col = matches[3]
